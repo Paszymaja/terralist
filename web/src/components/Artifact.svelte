@@ -8,13 +8,16 @@
 
   import config from '@/config';
   import { indent } from '@/lib/utils';
-  import { useQuery } from '@/lib/hooks';
+  import { useQuery, useFlag } from '@/lib/hooks';
 
   import Icon from './Icon.svelte';
   import Dropdown from './Dropdown.svelte';
   import FullPageError from './FullPageError.svelte';
   import LoadingScreen from './LoadingScreen.svelte';
   import MarkdownCode from './MarkdownCode.svelte';
+  import ConfirmationModal from './ConfirmationModal.svelte';
+  import ErrorModal from './ErrorModal.svelte';
+  import TransparentButton from './TransparentButton.svelte';
   import { emojify } from 'node-emoji';
 
   import {
@@ -58,6 +61,9 @@
     reverse: true
   });
 
+  const [deleteModalEnabled, showDeleteModal, hideDeleteModal] = useFlag(false);
+  let errorMessage: string = '';
+
   const onOptionSelect = (option: string) => {
     const url = computeArtifactUrl({
       type: type,
@@ -67,6 +73,35 @@
       version: option
     } as LocatableArtifact);
     push(url);
+  };
+
+  const deleteVersion = async () => {
+    const result = await Artifacts.delete(
+      namespace,
+      name,
+      provider || undefined,
+      version
+    );
+    if (result.status === 'OK') {
+      // Update local state by filtering out deleted version
+      versions = versions.filter(v => v !== version);
+      // Navigate to latest remaining version or back to dashboard
+      if (versions.length > 0) {
+        const url = computeArtifactUrl({
+          type: type,
+          namespace: namespace,
+          name: name,
+          provider: type == 'module' ? provider : undefined,
+          version: versions[0]
+        } as LocatableArtifact);
+        push(url);
+      } else {
+        push('/');
+      }
+    } else {
+      errorMessage = result.message;
+    }
+    hideDeleteModal();
   };
 
   let label: string = version;
@@ -168,8 +203,11 @@
             </h3>
           </div>
         </div>
-        <div class="w-full lg:w-auto">
+        <div class="w-full lg:w-auto flex items-center gap-2">
           <Dropdown {label} options={versions} onSelect={onOptionSelect} />
+          <TransparentButton onClick={showDeleteModal}>
+            <Icon name="trash" />
+          </TransparentButton>
         </div>
       </div>
       <div
@@ -197,3 +235,18 @@
     </section>
   {/if}
 </main>
+
+<ConfirmationModal
+  title={`Delete version ${version}`}
+  enabled={$deleteModalEnabled}
+  onClose={hideDeleteModal}
+  onSubmit={deleteVersion}>
+  This will permanently delete version <b>{version}</b> of
+  <b>{namespace}/{name}</b>.
+  <br /><br />
+  Are you sure?
+</ConfirmationModal>
+
+{#if errorMessage}
+  <ErrorModal bind:message={errorMessage} />
+{/if}
